@@ -1,0 +1,178 @@
+@import 'tailwindcss';
+
+@source '../views';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+    --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+/* ========================================
+   MAHESA99 — SLOT GAME THEME & ANIMATIONS
+   ======================================== */
+
+/* === Multiplier Glow Effect === */
+.multiplier-glow {
+    animation: multiplierGlow 0.6s ease-in-out;
+}
+
+@keyframes multiplierGlow {
+    0% {
+        box-shadow: 0 0 20px rgba(234, 179, 8, 0.3);
+        transform: scale(0.8);
+    }
+
+    50% {
+        box-shadow: 0 0 60px rgba(234, 179, 8, 0.8), 0 0 120px rgba(234, 179, 8, 0.4);
+        transform: scale(1.1);
+    }
+
+    100% {
+        box-shadow: 0 0 30px rgba(234, 179, 8, 0.5);
+        transform: scale(1);
+    }
+}
+
+/* === Symbol Pop (explode) Animation === */
+.symbol-pop {
+    animation: symbolPop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+@keyframes symbolPop {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    40% {
+        transform: scale(1.35);
+        opacity: 0.9;
+        filter: brightness(1.2);
+    }
+
+    100% {
+        transform: scale(0);
+        opacity: 0;
+    }
+}
+
+/* === Gravity Drop Animation === */
+.symbol-piece {
+    --board-gap: 0.375rem;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: calc((100% - (var(--board-gap) * 5)) / 6);
+    height: calc((100% - (var(--board-gap) * 4)) / 5);
+    transform: translate(
+        calc(var(--piece-col) * (100% + var(--board-gap))),
+        calc(var(--piece-row) * (100% + var(--board-gap)))
+    );
+    transition: transform var(--piece-duration, 0ms) cubic-bezier(0.18, 0.78, 0.24, 1);
+    will-change: transform;
+}
+
+@media (min-width: 640px) {
+    .symbol-piece {
+        --board-gap: 0.5rem;
+    }
+}
+
+/* === Win Shimmer on Grid Cells === */
+@keyframes winShimmer {
+
+    0%,
+    100% {
+        box-shadow: 0 0 8px rgba(234, 179, 8, 0.3), inset 0 0 8px rgba(234, 179, 8, 0.1);
+    }
+
+    50% {
+        box-shadow: 0 0 20px rgba(234, 179, 8, 0.6), inset 0 0 15px rgba(234, 179, 8, 0.2);
+    }
+}
+
+/* === Pulse glow for winning cells === */
+.ring-yellow-400\/80 {
+    animation: winShimmer 0.8s ease-in-out infinite;
+}
+
+/* === Counter tick animation === */
+@keyframes counterTick {
+    0% {
+        transform: translateY(0);
+    }
+
+    25% {
+        transform: translateY(-2px);
+    }
+
+    50% {
+        transform: translateY(0);
+    }
+
+    75% {
+        transform: translateY(2px);
+    }
+
+    100% {
+        transform: translateY(0);
+    }
+}
+
+/* === Smooth scrollbar for admin === */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* === Toggle Switch Fix === */
+input[type="checkbox"]:checked+div {
+    background-color: #eab308;
+}
+
+input[type="checkbox"]:checked+div::after {
+    transform: translateX(100%);
+}
+
+/* === Number input spinner removal === */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* === Grid cell hover effect === */
+.grid .aspect-square:hover {
+    background: linear-gradient(to bottom right, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+}
+
+/* === Body background pattern === */
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+        radial-gradient(circle at 20% 50%, rgba(120, 0, 200, 0.08) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, rgba(200, 150, 0, 0.06) 0%, transparent 50%),
+        radial-gradient(circle at 50% 80%, rgba(200, 0, 100, 0.05) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: -1;
+}
