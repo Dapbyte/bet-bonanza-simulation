@@ -18,7 +18,7 @@ class SlotEngine
         'grape'      => ['name' => 'Grape',       'emoji' => '🍇'],
         'banana'     => ['name' => 'Banana',      'emoji' => '🍌'],
         'scatter'    => ['name' => 'Scatter',     'emoji' => '🍭'],
-        
+
         // Multiplier bomb symbols (only appear in Free Spins)
         'bomb_2'     => ['name' => 'Bomb 2x',     'emoji' => '💣', 'multiplier' => 2],
         'bomb_5'     => ['name' => 'Bomb 5x',     'emoji' => '💣', 'multiplier' => 5],
@@ -57,6 +57,7 @@ class SlotEngine
             'blue_oval' => 10, 'apple' => 12, 'plum' => 12,
             'watermelon' => 12, 'grape' => 12, 'banana' => 12,
         ]);
+        $this->symbolChances = $this->filterBombWeights($this->symbolChances);
 
         $this->multipliers = GameSetting::getJson('multipliers', []);
         $this->scatterFrequency = (int) GameSetting::getValue('scatter_frequency', 0);
@@ -79,10 +80,12 @@ class SlotEngine
         // Inject scatter symbols
         $this->injectScatters($grid);
 
-        // Inject multiplier bombs if in Free Spins
+        // Inject multiplier bombs only in Free Spins
         if ($inFreeSpins) {
             $this->injectBombs($grid);
         }
+
+        $this->sanitizeBombs($grid, $inFreeSpins);
 
         return $grid;
     }
@@ -92,10 +95,11 @@ class SlotEngine
      */
     public function fillEmptyPositions(array &$grid, bool $inFreeSpins = false): void
     {
+        $allowBombs = $inFreeSpins;
         for ($i = 0; $i < 30; $i++) {
             if ($grid[$i] === null) {
                 // Determine if we inject a bomb or regular symbol
-                if ($inFreeSpins && rand(1, 100) <= $this->bombChance) {
+                if ($allowBombs && rand(1, 100) <= $this->bombChance) {
                     $grid[$i] = $this->getRandomBombSymbol();
                 } else {
                     $grid[$i] = $this->weightedRandom($this->symbolChances);
@@ -107,6 +111,8 @@ class SlotEngine
                 }
             }
         }
+
+        $this->sanitizeBombs($grid, $inFreeSpins);
     }
 
     /**
@@ -293,6 +299,50 @@ class SlotEngine
                 }
             }
         }
+    }
+
+    /**
+     * Check if the grid currently contains any scatter symbols.
+     */
+    protected function gridHasScatter(array $grid): bool
+    {
+        foreach ($grid as $symbol) {
+            if ($symbol === 'scatter') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Remove bombs if not in Free Spins.
+     */
+    protected function sanitizeBombs(array &$grid, bool $inFreeSpins): void
+    {
+        if ($inFreeSpins) {
+            return;
+        }
+
+        foreach ($grid as $i => $symbol) {
+            if ($symbol !== null && str_starts_with($symbol, 'bomb_')) {
+                $grid[$i] = $this->weightedRandom($this->filterBombWeights($this->symbolChances));
+            }
+        }
+    }
+
+    /**
+     * Remove bomb symbols from a weight table.
+     */
+    protected function filterBombWeights(array $weights): array
+    {
+        foreach (array_keys($weights) as $symbol) {
+            if (str_starts_with($symbol, 'bomb_')) {
+                unset($weights[$symbol]);
+            }
+        }
+
+        return $weights;
     }
 
     /**

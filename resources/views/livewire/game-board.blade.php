@@ -123,6 +123,22 @@
                                 </div>
                             </template>
 
+                            <template x-if="multiplierBombs.length > 0">
+                                <div class="mt-2 rounded-lg border border-yellow-500/20 bg-yellow-500/10 px-2 py-1.5">
+                                    <div class="mb-1 text-[10px] font-black uppercase tracking-wider text-yellow-300">
+                                        Pengali Bom
+                                    </div>
+                                    <div class="flex flex-wrap gap-1">
+                                        <template x-for="bomb in multiplierBombs" :key="bomb.position">
+                                            <span
+                                                class="rounded bg-black/30 px-1.5 py-0.5 text-[10px] font-black text-yellow-200">
+                                                x<span x-text="bomb.multiplier"></span>
+                                            </span>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+
                             <div x-show="tumblePanelData.length === 0"
                                 class="py-12 text-center text-xs text-zinc-500 italic">
                                 Putar slot untuk melihat kemenangan...
@@ -134,8 +150,22 @@
                     <div class="mt-4 border-t border-white/20 pt-3">
                         <div class="flex items-center justify-between">
                             <span class="text-xs font-bold text-zinc-400 uppercase tracking-wider">Subtotal</span>
-                            <span class="text-sm font-black text-green-400 sm:text-lg">+Rp<span
-                                    x-text="formatCredit(tumbleSubtotal)"></span></span>
+                            <span class="text-right text-sm font-black text-green-400 sm:text-lg">
+                                <template x-if="currentMultiplier > 1">
+                                    <span>Rp<span x-text="formatCredit(tumbleSubtotal)"></span> × x<span
+                                            x-text="currentMultiplier"></span></span>
+                                </template>
+                                <template x-if="currentMultiplier <= 1">
+                                    <span>+Rp<span x-text="formatCredit(tumbleSubtotal)"></span></span>
+                                </template>
+                            </span>
+                        </div>
+                        <div x-show="inFSMode && tumblePanelData.length > 0"
+                            class="mt-2 flex items-center justify-between border-t border-white/10 pt-2"
+                            style="display: none;">
+                            <span class="text-xs font-bold text-zinc-400 uppercase tracking-wider">Total</span>
+                            <span class="text-sm font-black text-yellow-300 sm:text-lg">+Rp<span
+                                    x-text="formatCredit(multipliedTotal)"></span></span>
                         </div>
                     </div>
                 </div>
@@ -148,7 +178,7 @@
                 'bg-gradient-to-b from-pink-500/50 via-purple-500/30 to-pink-500/50 shadow-2xl shadow-pink-500/20' :
                 'bg-gradient-to-b from-yellow-500/30 via-amber-600/20 to-yellow-500/30'">
             <div class="rounded-xl border border-yellow-500/10 bg-[#0d0b1a] p-2 sm:p-4">
-                <div class="relative grid grid-cols-6 gap-1.5 sm:gap-2" x-ref="boardGrid">
+                <div class="relative grid grid-cols-6 gap-1.5 rounded-lg sm:gap-2" x-ref="boardGrid">
                     @for ($i = 0; $i < 30; $i++)
                         <div class="relative flex aspect-square min-w-0 items-center justify-center overflow-visible rounded-lg border border-white/10 bg-gradient-to-br from-white/5 to-white/[0.02]"
                             :class="{
@@ -168,6 +198,8 @@
                             <div class="symbol-piece"
                                 :class="{
                                     'z-20': piece.popping,
+                                    'symbol-piece-popping': piece.popping,
+                                    'symbol-piece-entering': piece.entering,
                                 }"
                                 :style="symbolPieceStyle(piece)">
                                 <template x-if="!isBomb(piece.symbol)">
@@ -306,12 +338,17 @@
             tumblePanelData: [],
             tumbleSubtotal: 0,
             currentMultiplier: 1,
+            multipliedTotal: 0,
+            spinSessionWin: 0,
+            multiplierBombs: [],
 
             // Interactive bet properties (client-side managed to remove lag)
             bet: @js($bet),
             coinValue: @js($coinValue),
             displayCredit: @js($credit),
             displayWins: 0,
+            totalWins: 0,
+            spinStartWins: 0,
 
             // Free Spins properties
             inFSMode: @js($inFreeSpins),
@@ -335,6 +372,7 @@
                     this.symbolPopups[i] = null;
                 }
                 this.syncPiecesToGrid(this.currentGrid);
+                this.displayWins = this.totalWins;
             },
 
             syncPiecesToGrid(grid) {
@@ -348,15 +386,17 @@
                     id: this.nextPieceId++,
                     symbol,
                     row,
+                    visualRow: row,
                     col,
                     duration: 0,
                     popping: false,
+                    entering: false,
                 };
             },
 
             symbolPieceStyle(piece) {
                 return [
-                    `--piece-row: ${piece.row}`,
+                    `--piece-row: ${piece.visualRow ?? piece.row}`,
                     `--piece-col: ${piece.col}`,
                     `--piece-duration: ${piece.duration || 0}ms`,
                 ].join('; ');
@@ -392,6 +432,10 @@
 
             formatCredit(value) {
                 return new Intl.NumberFormat('id-ID').format(value || 0);
+            },
+
+            allColumns() {
+                return new Set([0, 1, 2, 3, 4, 5]);
             },
 
             setBet(value) {
@@ -435,7 +479,10 @@
                 this.tumblePanelData = [];
                 this.tumbleSubtotal = 0;
                 this.currentMultiplier = 1;
-                this.displayWins = 0;
+                this.multipliedTotal = 0;
+                this.spinSessionWin = 0;
+                this.multiplierBombs = [];
+                this.spinStartWins = this.totalWins;
                 this.showMultiplierFlash = false;
 
                 // Clear existing interval
@@ -463,19 +510,25 @@
                     freeSpinsFinished
                 } = data;
 
+                this.fsRemaining = freeSpinsRemaining;
+                this.fsWinTotal = totalFreeSpinWin;
+
                 // Clear spin shuffle interval
                 if (this.spinInterval) {
                     clearInterval(this.spinInterval);
                     this.spinInterval = null;
                 }
 
-                const startingGrid = tumbles.length > 0 ? tumbles[0].grid : finalGrid;
-                this.currentGrid = [...startingGrid];
-                this.syncPiecesToGrid(this.currentGrid);
-
                 if (tumbles.length === 0) {
                     this.currentGrid = finalGrid;
-                    this.syncPiecesToGrid(this.currentGrid);
+                    await this.dropInGrid(this.currentGrid);
+                    this.spinSessionWin = 0;
+                    this.tumbleSubtotal = 0;
+                    this.multipliedTotal = 0;
+                    if (finalWin > 0) {
+                        this.totalWins = this.spinStartWins + finalWin;
+                        await this.animateCounter('displayWins', this.totalWins, 320);
+                    }
                     this.displayCredit = credit;
                     this.isAnimating = false;
                     await this.handleFSTransitions(freeSpinsTriggered, freeSpinsFinished, totalFreeSpinWin,
@@ -484,7 +537,12 @@
                     return;
                 }
 
+                const startingGrid = tumbles.length > 0 ? tumbles[0].grid : finalGrid;
+                this.currentGrid = [...startingGrid];
+                await this.dropInGrid(this.currentGrid);
+
                 let accumulatedBaseWin = 0;
+                this.multiplierBombs = bombs || [];
 
                 for (let t = 0; t < tumbles.length; t++) {
                     const tumble = tumbles[t];
@@ -511,10 +569,12 @@
                     // Append tumble list for this spin
                     this.tumblePanelData = [...this.tumblePanelData, ...tumble.wins];
                     accumulatedBaseWin += tumble.subtotal;
+                    this.spinSessionWin = accumulatedBaseWin;
                     this.tumbleSubtotal = accumulatedBaseWin;
+                    this.multipliedTotal = this.spinSessionWin;
 
-                    await this.animateCounter('displayWins', accumulatedBaseWin, 350);
-                    await this.sleep(250);
+                    await this.animateCounter('displayWins', this.spinStartWins + this.spinSessionWin, 300);
+                    await this.sleep(180);
 
                     // Pop/explode winning symbols
                     this.poppingPositions = [...new Set(this.winPositions)];
@@ -531,7 +591,7 @@
                     }
                     this.currentGrid = blankGrid;
                     this.symbolPieces = this.symbolPieces.filter((piece) => !piece.popping);
-                    await this.sleep(80);
+                    await this.sleep(120);
 
                     // Drop remaining symbols and fill new ones (Gravitational cascade)
                     const nextGrid = tumble.nextGrid || finalGrid;
@@ -555,6 +615,11 @@
 
                 // Apply Multiplier Bombs if present at the end of the tumble loop
                 if (multiplierSum > 0 && accumulatedBaseWin > 0) {
+                    this.currentMultiplier = multiplierSum;
+                    this.spinSessionWin = finalWin;
+                    this.multipliedTotal = this.spinSessionWin;
+                    await this.popMultiplierBombs(this.multiplierBombs, finalGrid);
+
                     // Flash the total accumulated multiplier bomb sum
                     this.flashMultiplierValue = multiplierSum;
                     this.showMultiplierFlash = true;
@@ -562,8 +627,8 @@
                     this.showMultiplierFlash = false;
 
                     // Animate wins counter to final multiplied value
-                    await this.animateCounter('displayWins', finalWin, 400);
-                    await this.sleep(300);
+                    await this.animateCounter('displayWins', this.spinStartWins + this.spinSessionWin, 360);
+                    await this.sleep(180);
                 }
 
                 // Check if there was a re-trigger in Free Spins
@@ -575,12 +640,16 @@
                 }
 
                 // Update final grid and credit balance
-                this.currentGrid = finalGrid;
+                if (!(multiplierSum > 0 && accumulatedBaseWin > 0)) {
+                    this.currentGrid = finalGrid;
+                }
                 this.displayCredit = credit;
                 if (this.inFSMode) {
                     this.fsWinTotal = totalFreeSpinWin;
                     this.fsRemaining = freeSpinsRemaining;
                 }
+
+                this.totalWins = this.spinStartWins + finalWin;
 
                 await this.sleep(300);
                 this.isAnimating = false;
@@ -596,9 +665,11 @@
 
                 for (const piece of this.symbolPieces) {
                     piece.duration = 0;
+                    piece.entering = false;
                 }
 
                 const enteringPieces = [];
+                const movingPieces = [];
 
                 for (let col = 0; col < 6; col++) {
                     if (affectedColumns && !affectedColumns.has(col)) {
@@ -607,18 +678,29 @@
 
                     const columnPieces = this.symbolPieces
                         .filter((piece) => piece.col === col)
-                        .sort((a, b) => b.row - a.row);
+                        .sort((a, b) => (b.visualRow ?? b.row) - (a.visualRow ?? a.row));
 
-                    const emptyCount = 5 - columnPieces.length;
+                    let emptyCount = 0;
+                    for (let row = 0; row < 5; row++) {
+                        const pos = row * 6 + col;
+                        if (blankGrid[pos] === null && nextGrid[pos] !== null) {
+                            emptyCount++;
+                        }
+                    }
 
                     for (let i = 0; i < columnPieces.length; i++) {
                         const piece = columnPieces[i];
                         const targetRow = 4 - i;
-                        const distance = Math.max(0, targetRow - piece.row);
+                        const currentRow = piece.visualRow ?? piece.row;
+                        const distance = Math.max(0, targetRow - currentRow);
                         const duration = distance > 0 ? 360 + distance * 90 : 0;
 
-                        piece.duration = duration;
                         piece.row = targetRow;
+                        movingPieces.push({
+                            piece,
+                            targetRow,
+                            duration,
+                        });
                         maxDuration = Math.max(maxDuration, duration);
                     }
 
@@ -630,39 +712,190 @@
                             continue;
                         }
 
-                        const distance = emptyCount;
-                        const duration = 360 + distance * 90;
-                        const piece = this.createPiece(symbol, pos, row - emptyCount, col);
+                        const spawnRow = -1.15 - (emptyCount - row - 1) * 1.05;
+                        const distance = row - spawnRow;
+                        const duration = 360 + Math.ceil(distance) * 90;
+                        const piece = this.createPiece(symbol, pos, row, col);
 
-                        piece.duration = duration;
+                        piece.visualRow = spawnRow;
+                        piece.duration = 0;
+                        piece.entering = true;
                         this.symbolPieces.push(piece);
                         enteringPieces.push({
                             piece,
-                            row,
+                            targetRow: row,
+                            duration,
                         });
 
                         maxDuration = Math.max(maxDuration, duration);
                     }
                 }
 
-                await this.nextFrame();
+                await this.forcePaint();
+
+                for (const move of movingPieces) {
+                    move.piece.duration = move.duration;
+                }
 
                 for (const entry of enteringPieces) {
-                    entry.piece.row = entry.row;
+                    entry.piece.duration = entry.duration;
+                }
+
+                await this.forcePaint();
+
+                for (const move of movingPieces) {
+                    move.piece.visualRow = move.targetRow;
+                }
+
+                for (const entry of enteringPieces) {
+                    entry.piece.visualRow = entry.targetRow;
                 }
 
                 if (maxDuration > 0) {
-                    await this.sleep(maxDuration + 70);
+                    await this.sleep(maxDuration + 140);
                 }
 
                 for (const piece of this.symbolPieces) {
                     piece.duration = 0;
+                    piece.entering = false;
                 }
+            },
+
+            async dropInGrid(grid) {
+                const blankGrid = Array(30).fill(null);
+                this.currentGrid = blankGrid;
+                this.symbolPieces = [];
+                await this.nextFrame();
+                await this.sleep(120);
+
+                const fallingPieces = [];
+                let maxDuration = 0;
+
+                for (let pos = 0; pos < 30; pos++) {
+                    const symbol = grid[pos];
+                    if (symbol === null) continue;
+
+                    const row = Math.floor(pos / 6);
+                    const col = pos % 6;
+                    const spawnRow = row - 5.5;
+                    const distance = row - spawnRow;
+                    const duration = 560 + Math.ceil(distance) * 120;
+
+                    const piece = this.createPiece(symbol, pos, row, col);
+                    piece.visualRow = spawnRow;
+                    piece.duration = 0;
+                    piece.entering = true;
+                    this.symbolPieces.push(piece);
+                    fallingPieces.push({
+                        piece,
+                        targetRow: row,
+                        duration,
+                    });
+
+                    maxDuration = Math.max(maxDuration, duration);
+                }
+
+                await this.forcePaint();
+
+                for (const entry of fallingPieces) {
+                    entry.piece.duration = entry.duration;
+                }
+
+                await this.forcePaint();
+
+                for (const entry of fallingPieces) {
+                    entry.piece.visualRow = entry.targetRow;
+                }
+
+                if (maxDuration > 0) {
+                    await this.sleep(maxDuration + 220);
+                }
+
+                for (const piece of this.symbolPieces) {
+                    piece.duration = 0;
+                    piece.entering = false;
+                }
+
+                this.currentGrid = [...grid];
+            },
+
+            async popMultiplierBombs(bombs, finalGrid) {
+                if (!bombs || bombs.length === 0) return;
+
+                const bombPositions = bombs.map((bomb) => bomb.position);
+                for (const bomb of bombs) {
+                    this.symbolPopups[bomb.position] = `x${bomb.multiplier}`;
+                }
+
+                await this.sleep(180);
+
+                for (const piece of this.symbolPieces) {
+                    piece.popping = bombPositions.includes(this.positionFromPiece(piece));
+                }
+
+                await this.sleep(270);
+
+                for (const bomb of bombs) {
+                    this.symbolPopups[bomb.position] = null;
+                }
+
+                const blankGrid = [...this.currentGrid];
+                for (const pos of bombPositions) {
+                    blankGrid[pos] = null;
+                }
+
+                this.symbolPieces = this.symbolPieces.filter((piece) => !piece.popping);
+                this.currentGrid = blankGrid;
+                await this.sleep(90);
+
+                const settledGrid = this.collapseBombColumns(finalGrid, bombPositions);
+                const affectedColumns = new Set(bombPositions.map((pos) => pos % 6));
+                await this.animateCascadeToGrid(blankGrid, settledGrid, affectedColumns);
+                this.currentGrid = settledGrid;
+            },
+
+            collapseBombColumns(grid, bombPositions) {
+                const result = [...grid];
+                const bombSet = new Set(bombPositions);
+
+                for (const pos of bombPositions) {
+                    result[pos] = null;
+                }
+
+                for (const col of new Set(bombPositions.map((pos) => pos % 6))) {
+                    const columnSymbols = [];
+
+                    for (let row = 4; row >= 0; row--) {
+                        const pos = row * 6 + col;
+                        if (!bombSet.has(pos) && grid[pos] !== null) {
+                            columnSymbols.push(grid[pos]);
+                        }
+                    }
+
+                    for (let row = 4; row >= 0; row--) {
+                        const pos = row * 6 + col;
+                        const index = 4 - row;
+                        result[pos] = columnSymbols[index] ?? null;
+                    }
+                }
+
+                return result;
             },
 
             nextFrame() {
                 return new Promise(resolve => {
                     requestAnimationFrame(() => requestAnimationFrame(resolve));
+                });
+            },
+
+            forcePaint() {
+                return new Promise(resolve => {
+                    requestAnimationFrame(() => {
+                        if (this.$refs?.boardGrid) {
+                            void this.$refs.boardGrid.getBoundingClientRect();
+                        }
+                        requestAnimationFrame(resolve);
+                    });
                 });
             },
 
@@ -684,7 +917,7 @@
 
                     this.fsAutoStartTimer = setTimeout(() => {
                         if (this.showFSIntro && !this.inFSMode) {
-                            this.startFreeSpins();
+                            this.startFreeSpins(remaining, bonusTotal);
                         }
                     }, 900);
                 } else if (finished) {
@@ -700,15 +933,15 @@
                 }
             },
 
-            startFreeSpins() {
+            startFreeSpins(remaining = this.fsRemaining, bonusTotal = this.fsWinTotal) {
                 if (this.fsAutoStartTimer) {
                     clearTimeout(this.fsAutoStartTimer);
                 }
 
                 this.showFSIntro = false;
                 this.inFSMode = true;
-                this.fsRemaining = 10;
-                this.fsWinTotal = 0;
+                this.fsRemaining = remaining;
+                this.fsWinTotal = bonusTotal;
 
                 // Spin the first Free Spin
                 setTimeout(() => {
