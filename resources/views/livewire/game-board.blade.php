@@ -178,7 +178,7 @@
                 'bg-gradient-to-b from-pink-500/50 via-purple-500/30 to-pink-500/50 shadow-2xl shadow-pink-500/20' :
                 'bg-gradient-to-b from-yellow-500/30 via-amber-600/20 to-yellow-500/30'">
             <div class="rounded-xl border border-yellow-500/10 bg-[#0d0b1a] p-2 sm:p-4">
-                <div class="relative grid grid-cols-6 gap-1.5 rounded-lg sm:gap-2" x-ref="boardGrid">
+                <div class="relative grid grid-cols-6 gap-1.5 rounded-lg sm:gap-2 overflow-hidden" x-ref="boardGrid">
                     @for ($i = 0; $i < 30; $i++)
                         <div class="relative flex aspect-square min-w-0 items-center justify-center overflow-visible rounded-lg border border-white/10 bg-gradient-to-br from-white/5 to-white/[0.02]"
                             :class="{
@@ -186,14 +186,10 @@
                                     {{ $i }}),
                             }">
 
-                            <!-- Individual Win Payout Popups -->
-                            <div x-show="symbolPopups[{{ $i }}]" x-transition
-                                class="absolute -top-3 left-1/2 z-45 max-w-[8rem] -translate-x-1/2 rounded border border-yellow-500/30 bg-black/95 px-1.5 py-1 text-center text-[9px] font-bold leading-tight text-yellow-400 shadow-lg sm:max-w-none sm:whitespace-nowrap sm:text-xs"
-                                x-text="symbolPopups[{{ $i }}]"></div>
                         </div>
                     @endfor
 
-                    <div class="pointer-events-none absolute inset-0 z-10 overflow-visible">
+                    <div class="pointer-events-none absolute inset-0 z-10 overflow-hidden">
                         <template x-for="piece in symbolPieces" :key="piece.id">
                             <div class="symbol-piece"
                                 :class="{
@@ -229,52 +225,41 @@
     </div>
 
     <!-- Controls Row (Lag-free bet updates) -->
-    <div class="mt-4 grid grid-cols-1 gap-2 sm:mt-5 sm:grid-cols-3 sm:gap-3">
-        <div class="rounded-xl border border-white/10 bg-white/5 p-3">
-            <label class="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Coin
-                Value</label>
-            <div class="grid grid-cols-3 gap-1">
-                @foreach ([100, 200, 500] as $val)
-                    <button @click="setCoinValue({{ $val }})" :disabled="isAnimating || inFSMode"
-                        class="rounded-lg py-2 text-xs font-bold transition-all disabled:opacity-50"
-                        :class="coinValue === {{ $val }} ? 'bg-yellow-500 text-black' :
-                            'bg-white/10 text-zinc-400 hover:bg-white/20'">
-                        {{ $val }}
-                    </button>
-                @endforeach
-            </div>
-        </div>
-
-        <div class="rounded-xl border border-white/10 bg-white/5 p-3">
-            <label class="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Bet</label>
-            <div class="flex items-center gap-2">
-                <button @click="setBet(bet - 1)" :disabled="isAnimating || inFSMode"
-                    class="grid h-9 w-9 place-items-center rounded-lg bg-white/10 text-lg font-bold text-white transition-all hover:bg-white/20 disabled:opacity-50">-</button>
-                <div class="min-w-0 flex-1 text-center text-lg font-black text-white" x-text="bet"></div>
-                <button @click="setBet(bet + 1)" :disabled="isAnimating || inFSMode"
-                    class="grid h-9 w-9 place-items-center rounded-lg bg-white/10 text-lg font-bold text-white transition-all hover:bg-white/20 disabled:opacity-50">+</button>
-            </div>
-        </div>
-
+    <div class="mt-4 grid grid-cols-1 gap-2 sm:mt-5 sm:gap-3">
         <div class="rounded-xl border border-white/10 bg-white/5 p-3">
             <label class="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Total
                 Bet</label>
-            <div class="truncate text-center text-lg font-black text-yellow-400"
-                x-text="'Rp' + formatCredit(bet * coinValue)"></div>
+            <div class="flex items-center gap-2">
+                <button @click="setTotalBet(totalBet - totalBetStep)" :disabled="isAnimating || inFSMode"
+                    class="grid h-9 w-9 place-items-center rounded-lg bg-white/10 text-lg font-bold text-white transition-all hover:bg-white/20 disabled:opacity-50">-</button>
+                <div class="min-w-0 flex-1 text-center text-lg font-black text-yellow-400"
+                    x-text="'Rp' + formatCredit(totalBet)"></div>
+                <button @click="setTotalBet(totalBet + totalBetStep)" :disabled="isAnimating || inFSMode"
+                    class="grid h-9 w-9 place-items-center rounded-lg bg-white/10 text-lg font-bold text-white transition-all hover:bg-white/20 disabled:opacity-50">+</button>
+            </div>
+            <div class="mt-2 text-center text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                Step +200
+            </div>
         </div>
     </div>
 
-    <!-- Credit, Bet, Wins Display Panel -->
-    <div class="mt-2 grid grid-cols-3 gap-2 sm:mt-3 sm:gap-3">
-        <div class="rounded-xl border border-emerald-500/20 bg-emerald-950/40 p-2 text-center sm:p-3">
+    <!-- Credit, Total Bet, Wins Display Panel -->
+    <div class="mt-2 grid grid-cols-1 gap-2 sm:mt-3 sm:grid-cols-3 sm:gap-3">
+        <div
+            class="relative rounded-xl border border-emerald-500/20 bg-emerald-950/40 p-2 text-center sm:p-3 overflow-hidden">
             <div class="text-[10px] font-semibold uppercase tracking-wider text-emerald-400/60">Credit</div>
             <div class="truncate text-sm font-black text-emerald-400 sm:text-lg"
                 x-text="'Rp' + formatCredit(displayCredit)"></div>
+            <div x-show="showDebitFlash"
+                class="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-xs font-black uppercase tracking-wider text-red-300 debit-pop"
+                style="display: none;">
+                -Rp<span x-text="formatCredit(debitFlashValue)"></span>
+            </div>
         </div>
         <div class="rounded-xl border border-blue-500/20 bg-blue-950/40 p-2 text-center sm:p-3">
-            <div class="text-[10px] font-semibold uppercase tracking-wider text-blue-400/60">Bet</div>
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-blue-400/60">Total Bet</div>
             <div class="truncate text-sm font-black text-blue-400 sm:text-lg"
-                x-text="inFSMode ? 'FREE' : 'Rp' + formatCredit(bet * coinValue)"></div>
+                x-text="inFSMode ? 'FREE' : 'Rp' + formatCredit(totalBet)"></div>
         </div>
         <div class="rounded-xl border border-yellow-500/20 bg-yellow-950/40 p-2 text-center sm:p-3">
             <div class="text-[10px] font-semibold uppercase tracking-wider text-yellow-400/60">Wins</div>
@@ -283,39 +268,55 @@
         </div>
     </div>
 
+
     <!-- Spin Buttons Row -->
-    <div class="mt-3 flex gap-2 sm:mt-4 sm:gap-3">
+    <div class="mt-3 flex flex-col gap-2 sm:mt-4 sm:flex-row sm:gap-3">
         <button @click="triggerSpin()" :disabled="isAnimating" x-show="!autoplay"
-            class="min-w-0 flex-1 rounded-xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-500 py-4 text-base font-black uppercase tracking-wider text-black shadow-lg shadow-yellow-500/25 transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 sm:text-lg">
+            class="w-full min-w-0 sm:flex-1 rounded-xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-500 py-4 text-base font-black uppercase tracking-wider text-black shadow-lg shadow-yellow-500/25 transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 sm:text-lg">
             <span x-show="!isAnimating">SPIN</span>
             <span x-show="isAnimating" style="display: none;">SPINNING...</span>
         </button>
 
-        <div x-show="!autoplay" class="relative" x-data="{ showAutoMenu: false }">
+        <div x-show="!autoplay" class="relative w-full sm:w-auto" x-data="{ showAutoMenu: false }">
             <button @click="showAutoMenu = !showAutoMenu" :disabled="isAnimating"
-                class="h-full rounded-xl border border-white/20 bg-white/10 px-4 text-xs font-bold uppercase tracking-wider text-white transition-all hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50 sm:px-6 sm:text-sm">
+                class="h-full w-full sm:w-auto rounded-xl border border-white/20 bg-white/10 px-4 text-xs font-bold uppercase tracking-wider text-white transition-all hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50 sm:px-6 sm:text-sm">
                 AUTO
             </button>
 
             <div x-show="showAutoMenu" @click.outside="showAutoMenu = false" x-transition
-                class="absolute bottom-full right-0 z-40 mb-2 min-w-[120px] rounded-xl border border-white/20 bg-[#1a1a2e] p-2 shadow-2xl"
+                class="absolute bottom-full right-0 z-40 mb-2 w-full sm:w-72 rounded-xl border border-white/20 bg-[#1a1a2e] p-3 shadow-2xl"
                 style="display: none;">
-                @foreach ([10, 25, 50, 100] as $count)
-                    <button @click="startAutoplay({{ $count }}); showAutoMenu = false"
-                        class="w-full rounded-lg px-4 py-2 text-left text-sm text-zinc-300 transition-all hover:bg-yellow-500/20 hover:text-yellow-400">
-                        {{ $count }} Spins
-                    </button>
-                @endforeach
+                <div class="mb-2 text-[10px] font-black uppercase tracking-widest text-zinc-400">Auto Spins</div>
+                <input type="range" min="0" :max="autoSpinSteps.length - 1" step="1"
+                    x-model.number="autoSpinIndex" class="auto-spin-range">
+
+                <div class="mt-2 flex items-center justify-between text-xs">
+                    <span class="text-zinc-500">Selected</span>
+                    <span class="text-sm font-black text-yellow-400"
+                        x-text="autoSpinSteps[autoSpinIndex] + ' Spins'"></span>
+                </div>
+
+                <div class="mt-2 flex items-center justify-between text-[10px] text-zinc-500">
+                    <template x-for="(step, idx) in autoSpinSteps" :key="idx">
+                        <span class="min-w-[1.5rem] text-center" x-text="step"></span>
+                    </template>
+                </div>
+
+                <button @click="startAutoplay(autoSpinSteps[autoSpinIndex]); showAutoMenu = false"
+                    class="mt-3 w-full rounded-lg bg-gradient-to-r from-yellow-500 to-amber-500 py-2 text-xs font-black uppercase tracking-wider text-black shadow-lg shadow-yellow-500/25 active:scale-95">
+                    Start Auto
+                </button>
             </div>
         </div>
 
         <button x-show="autoplay" @click="stopAutoplay()"
-            class="min-w-0 flex-1 rounded-xl bg-gradient-to-r from-red-600 to-red-500 py-4 text-lg font-black uppercase tracking-wider text-white shadow-lg shadow-red-500/25 transition-all hover:from-red-500 hover:to-red-400 active:scale-95"
+            class="w-full min-w-0 sm:flex-1 rounded-xl bg-gradient-to-r from-red-600 to-red-500 py-4 text-lg font-black uppercase tracking-wider text-white shadow-lg shadow-red-500/25 transition-all hover:from-red-500 hover:to-red-400 active:scale-95"
             style="display: none;">
             STOP
         </button>
 
-        <div x-show="autoplay" class="flex items-center rounded-xl border border-white/10 bg-white/5 px-3"
+        <div x-show="autoplay"
+            class="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 sm:w-auto"
             style="display: none;">
             <span class="text-xs text-zinc-400">Left:</span>
             <span class="ml-2 text-lg font-black text-yellow-400" x-text="autoplayRemaining"></span>
@@ -331,7 +332,6 @@
             nextPieceId: 1,
             winPositions: [],
             poppingPositions: [],
-            symbolPopups: {},
             isAnimating: false,
             showMultiplierFlash: false,
             flashMultiplierValue: 1,
@@ -343,12 +343,20 @@
             multiplierBombs: [],
 
             // Interactive bet properties (client-side managed to remove lag)
-            bet: @js($bet),
-            coinValue: @js($coinValue),
+            totalBet: @js($totalBet),
+            minTotalBet: 200,
+            maxTotalBet: 5000,
+            totalBetStep: 200,
             displayCredit: @js($credit),
             displayWins: 0,
             totalWins: 0,
             spinStartWins: 0,
+            pendingDebit: 0,
+            showDebitFlash: false,
+            debitFlashValue: 0,
+            debitFlashTimer: null,
+            debitLog: [],
+            nextDebitId: 1,
 
             // Free Spins properties
             inFSMode: @js($inFreeSpins),
@@ -364,13 +372,12 @@
             // Autoplay properties
             autoplay: false,
             autoplayRemaining: 0,
+            autoSpinSteps: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+            autoSpinIndex: 0,
 
             spinInterval: null,
 
             init() {
-                for (let i = 0; i < 30; i++) {
-                    this.symbolPopups[i] = null;
-                }
                 this.syncPiecesToGrid(this.currentGrid);
                 this.displayWins = this.totalWins;
             },
@@ -438,18 +445,16 @@
                 return new Set([0, 1, 2, 3, 4, 5]);
             },
 
-            setBet(value) {
-                this.bet = Math.max(1, Math.min(10, value));
-            },
-
-            setCoinValue(value) {
-                this.coinValue = value;
+            setTotalBet(value) {
+                const clamped = Math.max(this.minTotalBet, Math.min(this.maxTotalBet, value));
+                const steps = Math.floor((clamped - this.minTotalBet) / this.totalBetStep);
+                this.totalBet = this.minTotalBet + steps * this.totalBetStep;
             },
 
             triggerSpin() {
                 if (this.isAnimating) return;
 
-                const totalBet = this.bet * this.coinValue;
+                const totalBet = this.totalBet;
                 if (!this.inFSMode && this.displayCredit < totalBet) {
                     this.dispatchToast('Saldo tidak cukup!', 'error');
                     this.stopAutoplay();
@@ -457,7 +462,7 @@
                 }
 
                 // Call the Livewire spin method, passing client values
-                this.$wire.spin(this.bet, this.coinValue);
+                this.$wire.spin(this.totalBet);
             },
 
             startAutoplay(count) {
@@ -484,6 +489,29 @@
                 this.multiplierBombs = [];
                 this.spinStartWins = this.totalWins;
                 this.showMultiplierFlash = false;
+                this.pendingDebit = 0;
+                if (this.debitFlashTimer) {
+                    clearTimeout(this.debitFlashTimer);
+                    this.debitFlashTimer = null;
+                }
+                this.showDebitFlash = false;
+
+                if (!this.inFSMode) {
+                    const debitValue = this.totalBet;
+                    this.pendingDebit = debitValue;
+                    this.displayCredit = Math.max(0, this.displayCredit - debitValue);
+                    this.debitFlashValue = debitValue;
+                    this.showDebitFlash = true;
+                    this.debitLog.unshift({
+                        id: this.nextDebitId++,
+                        amount: debitValue,
+                    });
+                    this.debitLog = this.debitLog.slice(0, 3);
+
+                    this.debitFlashTimer = setTimeout(() => {
+                        this.showDebitFlash = false;
+                    }, 900);
+                }
 
                 // Clear existing interval
                 if (this.spinInterval) {
@@ -556,8 +584,6 @@
                     for (const win of tumble.wins) {
                         for (const pos of win.positions) {
                             this.winPositions.push(pos);
-                            this.symbolPopups[pos] =
-                                `${win.emoji} x${win.count} -> +Rp${this.formatCredit(win.payout)}`;
                         }
                     }
 
@@ -587,7 +613,6 @@
                     const blankGrid = [...this.currentGrid];
                     for (const pos of this.winPositions) {
                         blankGrid[pos] = null;
-                        this.symbolPopups[pos] = null;
                     }
                     this.currentGrid = blankGrid;
                     this.symbolPieces = this.symbolPieces.filter((piece) => !piece.popping);
@@ -823,9 +848,6 @@
                 if (!bombs || bombs.length === 0) return;
 
                 const bombPositions = bombs.map((bomb) => bomb.position);
-                for (const bomb of bombs) {
-                    this.symbolPopups[bomb.position] = `x${bomb.multiplier}`;
-                }
 
                 await this.sleep(180);
 
@@ -834,10 +856,6 @@
                 }
 
                 await this.sleep(270);
-
-                for (const bomb of bombs) {
-                    this.symbolPopups[bomb.position] = null;
-                }
 
                 const blankGrid = [...this.currentGrid];
                 for (const pos of bombPositions) {
@@ -967,16 +985,18 @@
             async continueAutoplayIfNeeded() {
                 if (this.showFSIntro || this.showFSOutro) return;
 
+                const autoDelay = 300;
+
                 // If we are in Free Spins, it operates like a continuous autoplay until spins = 0
                 if (this.inFSMode && this.fsRemaining > 0) {
-                    await this.sleep(400);
+                    await this.sleep(autoDelay);
                     this.triggerSpin();
                     return;
                 }
 
                 // Standard autoplay continuation
                 if (this.autoplay && this.autoplayRemaining > 0) {
-                    await this.sleep(300);
+                    await this.sleep(autoDelay);
                     this.autoplayRemaining--;
                     this.triggerSpin();
                 } else {

@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\GameSetting;
 use App\Models\SpinLog;
+use App\Models\UserSpinSetting;
 use App\Services\SlotEngine;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
@@ -17,8 +18,7 @@ class GameBoard extends Component
 
     // Player state
     public int $credit = 0;
-    public int $bet = 1;
-    public int $coinValue = 100;
+    public int $totalBet = 200;
     public int $wins = 0;
 
     // Spin state
@@ -36,22 +36,18 @@ class GameBoard extends Component
     public int $tumbleStep = 0;
     public array $tumbleResults = [];
 
+    private const TOTAL_BET_MIN = 200;
+    private const TOTAL_BET_MAX = 5000;
+    private const TOTAL_BET_STEP = 200;
+
     public function mount(): void
     {
         $user = Auth::user();
         $this->credit = $user->balance;
 
         // Initialize grid with random symbols (display only)
-        $engine = new SlotEngine();
+        $engine = new SlotEngine(UserSpinSetting::forUser($user->id));
         $this->grid = $engine->generateGrid(false);
-    }
-
-    /**
-     * Computed property: total bet amount
-     */
-    public function getTotalBetProperty(): int
-    {
-        return $this->bet * $this->coinValue;
     }
 
     /**
@@ -63,7 +59,7 @@ class GameBoard extends Component
 
         $this->autoplay = true;
         $this->autoplayRemaining = $count;
-        $this->spin($this->bet, $this->coinValue);
+        $this->spin($this->totalBet);
     }
 
     /**
@@ -78,18 +74,16 @@ class GameBoard extends Component
     /**
      * Main spin action — authentic Sweet Bonanza logic.
      */
-    public function spin(int $clientBet, int $clientCoinValue): void
+    public function spin(int $clientTotalBet): void
     {
         if ($this->isSpinning) return;
+
+        $user = Auth::user();
 
         $wasInFreeSpins = $this->inFreeSpins;
 
         // Update local variables from client parameters (prevents lag on change)
-        $this->bet = max(1, min(10, $clientBet));
-        if (in_array($clientCoinValue, [100, 200, 500])) {
-            $this->coinValue = $clientCoinValue;
-        }
-
+        $this->totalBet = $this->normalizeTotalBet($clientTotalBet);
         $totalBet = $this->totalBet;
 
         // Deduct bet if NOT in Free Spins
@@ -101,7 +95,6 @@ class GameBoard extends Component
             }
 
             // Deduct balance
-            $user = Auth::user();
             $user->balance -= $totalBet;
             $user->save();
             $this->credit = $user->balance;
@@ -118,15 +111,17 @@ class GameBoard extends Component
         $this->dispatch('spin-started');
 
         // Generate initial grid (check if Free Spins is active)
-        $engine = new SlotEngine();
         $this->spinCount++;
+        $engine = new SlotEngine(UserSpinSetting::forUser($user->id));
 
         $this->grid = $engine->generateGrid($this->inFreeSpins);
 
-        // Force scatters if setting is triggered
-        $scatterFreq = (int) GameSetting::getValue('scatter_frequency', 0);
-        if ($scatterFreq > 0 && $this->spinCount % $scatterFreq === 0) {
-            $engine->forceScatters($this->grid);
+        // Force scatters if setting is triggered (only when per-user rates are disabled)
+        if (! $engine->usesUserSpinSettings()) {
+            $scatterFreq = (int) GameSetting::getValue('scatter_frequency', 0);
+            if ($scatterFreq > 0 && $this->spinCount % $scatterFreq === 0) {
+                $engine->forceScatters($this->grid);
+            }
         }
 
         // Tumble evaluation variables
@@ -228,7 +223,6 @@ class GameBoard extends Component
         }
 
         // Credit winnings to balance
-        $user = Auth::user();
         if ($finalWin > 0) {
             $user->refresh();
             $user->balance += $finalWin;
@@ -291,8 +285,16 @@ class GameBoard extends Component
     public function continueAutoplay(): void
     {
         if ($this->autoplay && $this->autoplayRemaining > 0) {
-            $this->spin($this->bet, $this->coinValue);
+            $this->spin($this->totalBet);
         }
+    }
+
+    private function normalizeTotalBet(int $value): int
+    {
+        $clamped = max(self::TOTAL_BET_MIN, min(self::TOTAL_BET_MAX, $value));
+        $steps = intdiv($clamped - self::TOTAL_BET_MIN, self::TOTAL_BET_STEP);
+
+        return self::TOTAL_BET_MIN + ($steps * self::TOTAL_BET_STEP);
     }
 
     public function render()

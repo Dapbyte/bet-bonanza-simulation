@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\GameSetting;
+use App\Models\UserSpinSetting;
 
 class SlotEngine
 {
@@ -42,8 +43,19 @@ class SlotEngine
     protected int $maxMultiplier;
     protected int $bombChance; // Chance out of 100 for a bomb to appear in Free Spins
 
-    public function __construct()
+    protected ?UserSpinSetting $userSetting = null;
+    protected array $userSymbolRates = [];
+    protected int $userSpinWindowSize = 0;
+    protected int $userWindowSpinCount = 0;
+    protected array $userWindowSymbolCounts = [];
+    protected int $userWindowScatterCount = 0;
+    protected int $userWindowBombCount = 0;
+    protected int $userScatterRate = 0;
+    protected int $userBombRate = 0;
+
+    public function __construct(?UserSpinSetting $userSetting = null)
     {
+        $this->userSetting = $userSetting;
         $this->loadSettings();
     }
 
@@ -64,6 +76,17 @@ class SlotEngine
         $this->tumbleEnabled = (bool) GameSetting::getValue('tumble_enabled', 1);
         $this->maxMultiplier = (int) GameSetting::getValue('max_multiplier', 100);
         $this->bombChance = (int) GameSetting::getValue('multiplier_bomb_chance', 8); // Default 8% chance per position in Free Spins
+
+        if ($this->userSetting) {
+            $this->userSymbolRates = $this->sanitizeRateArray($this->userSetting->symbol_rates ?? []);
+            $this->userSpinWindowSize = max(1, (int) $this->userSetting->spin_window_size);
+            $this->userWindowSpinCount = max(0, (int) $this->userSetting->window_spin_count);
+            $this->userWindowSymbolCounts = $this->sanitizeRateArray($this->userSetting->window_symbol_counts ?? []);
+            $this->userWindowScatterCount = max(0, (int) $this->userSetting->window_scatter_count);
+            $this->userWindowBombCount = max(0, (int) $this->userSetting->window_bomb_count);
+            $this->userScatterRate = max(0, (int) $this->userSetting->scatter_rate);
+            $this->userBombRate = max(0, (int) $this->userSetting->bomb_rate);
+        }
     }
 
     /**
@@ -71,6 +94,12 @@ class SlotEngine
      */
     public function generateGrid(bool $inFreeSpins = false): array
     {
+        if ($this->usesUserSpinSettings()) {
+            $grid = $this->generateGridWithUserRates($inFreeSpins);
+            $this->sanitizeBombs($grid, $inFreeSpins);
+            return $grid;
+        }
+
         $grid = [];
 
         for ($i = 0; $i < 30; $i++) {
@@ -90,11 +119,261 @@ class SlotEngine
         return $grid;
     }
 
+    public function usesUserSpinSettings(): bool
+    {
+        return $this->userSetting !== null && (bool) $this->userSetting->is_enabled;
+    }
+
+    protected function generateGridWithUserRates(bool $inFreeSpins = false): array
+    {
+        $this->resetUserWindowIfNeeded();
+
+        $windowSize = max(1, $this->userSpinWindowSize);
+        $windowTotalDraws = $windowSize * 30;
+
+        $symbolRates = $this->getNormalizedSymbolRates();
+        $symbolCounts = $this->userWindowSymbolCounts;
+        $scatterCount = $this->userWindowScatterCount;
+        $bombCount = $this->userWindowBombCount;
+
+        $grid = [];
+
+        for ($i = 0; $i < 30; $i++) {
+            $drawsSoFar = $this->getTotalWindowDraws($symbolCounts, $scatterCount, $bombCount);
+            $remainingDraws = max(1, $windowTotalDraws - $drawsSoFar);
+
+            if ($this->shouldPlaceScatter($windowTotalDraws, $scatterCount, $remainingDraws)) {
+                $grid[$i] = 'scatter';
+                $scatterCount++;
+                continue;
+            }
+
+            if ($inFreeSpins && $this->shouldPlaceBomb($windowTotalDraws, $bombCount, $remainingDraws)) {
+                $grid[$i] = $this->getRandomBombSymbol();
+                $bombCount++;
+                continue;
+            }
+
+            $weights = $this->getWindowAdjustedWeights($symbolRates, $windowTotalDraws, $symbolCounts);
+            $symbol = $this->weightedRandom($weights);
+            $grid[$i] = $symbol;
+            $symbolCounts[$symbol] = ($symbolCounts[$symbol] ?? 0) + 1;
+        }
+
+        $this->userWindowSymbolCounts = $symbolCounts;
+        $this->userWindowScatterCount = $scatterCount;
+        $this->userWindowBombCount = $bombCount;
+        $this->userWindowSpinCount++;
+
+        $this->persistUserWindowCounts();
+
+        return $grid;
+    }
+
+    protected function getNormalizedSymbolRates(): array
+    {
+        $baseWeights = $this->symbolChances;
+        $symbols = array_keys($baseWeights);
+
+        $scatterRate = max(0, $this->userScatterRate);
+        $bombRate = max(0, $this->userBombRate);
+        $budget = max(0.0, 100.0 - $scatterRate - $bombRate);
+
+        $provided = [];
+        foreach ($symbols as $symbol) {
+            if (array_key_exists($symbol, $this->userSymbolRates)) {
+                $provided[$symbol] = max(0.0, (float) $this->userSymbolRates[$symbol]);
+            }
+        }
+
+        $normalized = [];
+        if ($budget <= 0.0) {
+            foreach ($symbols as $symbol) {
+                $normalized[$symbol] = 0.0;
+            }
+            return $normalized;
+        }
+
+        $providedTotal = array_sum($provided);
+        $remaining = $budget;
+
+        if ($providedTotal > 0.0) {
+            $scale = min(1.0, $budget / $providedTotal);
+            foreach ($provided as $symbol => $rate) {
+                $normalized[$symbol] = $rate * $scale;
+            }
+            $remaining = $budget - array_sum($normalized);
+        }
+
+        $missing = array_diff($symbols, array_keys($normalized));
+        if (! empty($missing) && $remaining > 0.0) {
+            $missingBaseTotal = array_sum(array_intersect_key($baseWeights, array_flip($missing)));
+            if ($missingBaseTotal > 0) {
+                foreach ($missing as $symbol) {
+                    $normalized[$symbol] = ($baseWeights[$symbol] / $missingBaseTotal) * $remaining;
+                }
+                $remaining = 0.0;
+            }
+        }
+
+        if ($remaining > 0.0) {
+            $currentTotal = array_sum($normalized);
+            if ($currentTotal > 0) {
+                foreach ($normalized as $symbol => $rate) {
+                    $normalized[$symbol] = $rate + ($rate / $currentTotal) * $remaining;
+                }
+            } else {
+                $baseTotal = array_sum($baseWeights);
+                if ($baseTotal > 0) {
+                    foreach ($symbols as $symbol) {
+                        $normalized[$symbol] = ($baseWeights[$symbol] / $baseTotal) * $remaining;
+                    }
+                }
+            }
+        }
+
+        foreach ($symbols as $symbol) {
+            $normalized[$symbol] = $normalized[$symbol] ?? 0.0;
+        }
+
+        return $normalized;
+    }
+
+    protected function getWindowAdjustedWeights(array $rates, int $windowTotalDraws, array $currentCounts): array
+    {
+        $weights = [];
+        foreach ($rates as $symbol => $rate) {
+            $target = $windowTotalDraws * ($rate / 100);
+            $remaining = $target - ($currentCounts[$symbol] ?? 0);
+            $weights[$symbol] = max(0.0, $remaining);
+        }
+
+        if (array_sum($weights) <= 0) {
+            return $rates;
+        }
+
+        return $weights;
+    }
+
+    protected function shouldPlaceScatter(int $windowTotalDraws, int $currentCount, int $remainingDraws): bool
+    {
+        if ($this->userScatterRate <= 0) {
+            return false;
+        }
+
+        $target = (int) round($windowTotalDraws * ($this->userScatterRate / 100));
+        $remaining = $target - $currentCount;
+        if ($remaining <= 0) {
+            return false;
+        }
+
+        $chance = min(1.0, $remaining / max(1, $remainingDraws));
+        return $this->randFloat() <= $chance;
+    }
+
+    protected function shouldPlaceBomb(int $windowTotalDraws, int $currentCount, int $remainingDraws): bool
+    {
+        if ($this->userBombRate <= 0) {
+            return false;
+        }
+
+        $target = (int) round($windowTotalDraws * ($this->userBombRate / 100));
+        $remaining = $target - $currentCount;
+        if ($remaining <= 0) {
+            return false;
+        }
+
+        $chance = min(1.0, $remaining / max(1, $remainingDraws));
+        return $this->randFloat() <= $chance;
+    }
+
+    protected function resetUserWindowIfNeeded(): void
+    {
+        if (! $this->userSetting) {
+            return;
+        }
+
+        $windowSize = max(1, $this->userSpinWindowSize);
+        if ($this->userWindowSpinCount < $windowSize) {
+            return;
+        }
+
+        $this->userWindowSpinCount = 0;
+        $this->userWindowSymbolCounts = [];
+        $this->userWindowScatterCount = 0;
+        $this->userWindowBombCount = 0;
+
+        $this->persistUserWindowCounts();
+    }
+
+    protected function persistUserWindowCounts(): void
+    {
+        if (! $this->userSetting) {
+            return;
+        }
+
+        $this->userSetting->spin_window_size = $this->userSpinWindowSize;
+        $this->userSetting->symbol_rates = $this->userSymbolRates;
+        $this->userSetting->scatter_rate = $this->userScatterRate;
+        $this->userSetting->bomb_rate = $this->userBombRate;
+        $this->userSetting->window_spin_count = $this->userWindowSpinCount;
+        $this->userSetting->window_symbol_counts = $this->userWindowSymbolCounts;
+        $this->userSetting->window_scatter_count = $this->userWindowScatterCount;
+        $this->userSetting->window_bomb_count = $this->userWindowBombCount;
+        $this->userSetting->save();
+    }
+
+    protected function getTotalWindowDraws(array $symbolCounts, int $scatterCount, int $bombCount): int
+    {
+        return (int) array_sum($symbolCounts) + $scatterCount + $bombCount;
+    }
+
+    protected function percentRoll(float $percent): bool
+    {
+        return $this->randFloat() <= ($percent / 100);
+    }
+
+    protected function randFloat(): float
+    {
+        return mt_rand() / mt_getrandmax();
+    }
+
+    protected function sanitizeRateArray(array $values): array
+    {
+        foreach ($values as $key => $value) {
+            $values[$key] = max(0, (int) $value);
+        }
+
+        return $values;
+    }
+
     /**
      * Fill empty positions (null) with new random symbols.
      */
     public function fillEmptyPositions(array &$grid, bool $inFreeSpins = false): void
     {
+        if ($this->usesUserSpinSettings()) {
+            $symbolRates = $this->getNormalizedSymbolRates();
+            for ($i = 0; $i < 30; $i++) {
+                if ($grid[$i] === null) {
+                    if ($this->userScatterRate > 0 && $this->percentRoll($this->userScatterRate)) {
+                        $grid[$i] = 'scatter';
+                        continue;
+                    }
+
+                    if ($inFreeSpins && $this->userBombRate > 0 && $this->percentRoll($this->userBombRate)) {
+                        $grid[$i] = $this->getRandomBombSymbol();
+                        continue;
+                    }
+
+                    $grid[$i] = $this->weightedRandom($symbolRates);
+                }
+            }
+
+            $this->sanitizeBombs($grid, $inFreeSpins);
+            return;
+        }
+
         $allowBombs = $inFreeSpins;
         for ($i = 0; $i < 30; $i++) {
             if ($grid[$i] === null) {
@@ -252,12 +531,16 @@ class SlotEngine
      */
     protected function weightedRandom(array $weights): string
     {
-        $total = max(1, array_sum($weights));
-        $rand = rand(1, $total);
-        $cumulative = 0;
+        $total = array_sum($weights);
+        if ($total <= 0) {
+            return array_key_first($weights) ?: 'apple';
+        }
+
+        $rand = $this->randFloat() * $total;
+        $cumulative = 0.0;
 
         foreach ($weights as $symbol => $weight) {
-            $cumulative += max(0, (int) $weight);
+            $cumulative += max(0.0, (float) $weight);
             if ($rand <= $cumulative) {
                 return $symbol;
             }
